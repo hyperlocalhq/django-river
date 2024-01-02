@@ -1,4 +1,4 @@
-from django.contrib import auth
+from django.contrib.auth.models import Permission
 from django.db.models import Min, CharField, Q, F
 from django.db.models.functions import Cast
 from django_cte import With
@@ -42,25 +42,38 @@ class OrmDriver(RiverDriver):
         ).filter(transition__source_state=getattr(workflow_objects.col, self.field_name + "_id"))
 
     def _authorized_approvals(self, as_user):
-        group_q = Q()
-        for g in as_user.groups.all():
-            group_q = group_q | Q(groups__in=[g])
+        # Fetching user's groups
+        user_groups = as_user.groups.all()
+        group_q = Q(groups__in=user_groups) if user_groups.exists() else Q()
 
-        permissions = []
-        for backend in auth.get_backends():
-            permissions.extend(backend.get_all_permissions(as_user))
+        # group_q = Q()
+        # for g in as_user.groups.all():
+        #     group_q = group_q | Q(groups__in=[g])
 
-        permission_q = Q()
-        for p in permissions:
-            label, codename = p.split('.')
-            permission_q = permission_q | Q(permissions__content_type__app_label=label,
-                                            permissions__codename=codename)
+
+
+        # Fetching user's permissions
+        user_permissions = Permission.objects.filter(user=as_user)
+        permission_q = Q(permissions__in=user_permissions) if user_permissions.exists() else Q()
+
+        # permissions = []
+        # for backend in auth.get_backends():
+        #     permissions.extend(backend.get_all_permissions(as_user))
+        #
+        # permission_q = Q()
+        # for p in permissions:
+        #     label, codename = p.split('.')
+        #     permission_q = permission_q | Q(
+        #         permissions__content_type__app_label=label,
+        #         permissions__codename=codename
+        #     )
+
 
         return TransitionApproval.objects.filter(
             Q(workflow=self.workflow, status=PENDING) &
             (
-                    (Q(transactioner__isnull=True) | Q(transactioner=as_user)) &
-                    (Q(permissions__isnull=True) | permission_q) &
-                    (Q(groups__isnull=True) | group_q)
+                (Q(transactioner__isnull=True) | Q(transactioner=as_user)) &
+                (Q(permissions__isnull=True) | permission_q) &
+                (Q(groups__isnull=True) | group_q)
             )
         )
